@@ -459,40 +459,15 @@ class Node:
         # Create a dictionary to store temp file index.
         self._incremental_dict = collections.defaultdict(lambda: 0)
 
-        if self.head:
-            self._ray_params.update_if_absent(
-                temp_dir=ray._common.utils.get_ray_temp_dir()
-            )
-            self._temp_dir = self._ray_params.temp_dir
-        else:
-            if self._ray_params.temp_dir is None:
-                assert not self._default_worker
-                temp_dir = ray._private.utils.internal_kv_get_with_retry(
-                    self.get_gcs_client(),
-                    "temp_dir",
-                    ray_constants.KV_NAMESPACE_SESSION,
-                    num_retries=ray_constants.NUM_REDIS_GET_RETRIES,
-                )
-                self._temp_dir = ray._common.utils.decode(temp_dir)
-            else:
-                self._temp_dir = self._ray_params.temp_dir
+        self._ray_params.update_if_absent(
+            # TODO(Kunchd): get_ray_temp_dir should be deprecated and not exposed to the user
+            temp_dir=ray._common.utils.get_ray_temp_dir()
+        )
+        self._temp_dir = self._ray_params.temp_dir
 
         try_to_create_directory(self._temp_dir)
 
-        if self.head:
-            self._session_dir = os.path.join(self._temp_dir, self._session_name)
-        else:
-            if self._temp_dir is None or self._session_name is None:
-                assert not self._default_worker
-                session_dir = ray._private.utils.internal_kv_get_with_retry(
-                    self.get_gcs_client(),
-                    "session_dir",
-                    ray_constants.KV_NAMESPACE_SESSION,
-                    num_retries=ray_constants.NUM_REDIS_GET_RETRIES,
-                )
-                self._session_dir = ray._common.utils.decode(session_dir)
-            else:
-                self._session_dir = os.path.join(self._temp_dir, self._session_name)
+        self._session_dir = os.path.join(self._temp_dir, self._session_name)
         session_symlink = os.path.join(self._temp_dir, ray_constants.SESSION_LATEST)
 
         # Send a warning message if the session exists.
