@@ -1294,19 +1294,6 @@ class Node:
                 f"error connecting to Redis."
             )
 
-        # TODO(Kunchd): temp dir information needs to be cleared from gcs kv store
-        self.get_gcs_client().internal_kv_put(
-            b"session_dir",
-            self._session_dir.encode(),
-            True,
-            ray_constants.KV_NAMESPACE_SESSION,
-        )
-        self.get_gcs_client().internal_kv_put(
-            b"temp_dir",
-            self._temp_dir.encode(),
-            True,
-            ray_constants.KV_NAMESPACE_SESSION,
-        )
         # Add tracing_startup_hook to redis / internal kv manually
         # since internal kv is not yet initialized.
         if self._ray_params.tracing_startup_hook:
