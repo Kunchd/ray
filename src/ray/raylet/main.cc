@@ -949,6 +949,7 @@ int main(int argc, char *argv[]) {
                                                    node_ip_address,
                                                    node_name,
                                                    temp_dir,
+                                                   session_dir,
                                                    node_manager_config,
                                                    object_manager_config,
                                                    *gcs_client,

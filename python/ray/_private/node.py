@@ -1294,6 +1294,7 @@ class Node:
                 f"error connecting to Redis."
             )
 
+        # TODO(Kunchd): temp dir information needs to be cleared from gcs kv store
         self.get_gcs_client().internal_kv_put(
             b"session_dir",
             self._session_dir.encode(),
