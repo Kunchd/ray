@@ -459,11 +459,39 @@ class Node:
         # Create a dictionary to store temp file index.
         self._incremental_dict = collections.defaultdict(lambda: 0)
 
-        self._ray_params.update_if_absent(
-            # TODO(Kunchd): get_ray_temp_dir should be deprecated and not exposed to the user
-            temp_dir=ray._common.utils.get_ray_temp_dir()
-        )
         self._temp_dir = self._ray_params.temp_dir
+        if self.head:
+            if self._temp_dir is None:
+                self._temp_dir = ray._common.utils.get_ray_temp_dir()
+        else:
+            if self._temp_dir is None:
+                # Fetch temp dir from head node's NodeInfo
+                head_node_id_bytes = ray._private.utils.internal_kv_get_with_retry(
+                    self.get_gcs_client(),
+                    ray_constants.KV_HEAD_NODE_ID_KEY,
+                    ray_constants.KV_NAMESPACE_JOB,
+                    num_retries=ray_constants.NUM_REDIS_GET_RETRIES,
+                )
+
+                if head_node_id_bytes is None:
+                    logger.warning(
+                        "Head node ID not found in GCS. Using Ray's default temp dir."
+                    )
+                    self._temp_dir = ray._common.utils.get_ray_temp_dir()
+                else:
+                    head_node_id = ray._common.utils.decode(head_node_id_bytes)
+                    node_info = ray._private.services.get_node(
+                        self.gcs_address,
+                        head_node_id,
+                    )
+                    self._temp_dir = node_info.get("temp_dir")
+                    if not self._temp_dir:
+                        logger.warning(
+                            "Head node temp_dir not found in NodeInfo. "
+                            "Using Ray's default temp dir."
+                            "Available node info: " + str(node_info)
+                        )
+                        self._temp_dir = ray._common.utils.get_ray_temp_dir()
 
         try_to_create_directory(self._temp_dir)
 

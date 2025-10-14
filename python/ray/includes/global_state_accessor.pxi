@@ -302,4 +302,6 @@ cdef class GlobalStateAccessor:
             "node_manager_port": c_node_info.node_manager_port(),
             "node_id": c_node_info.node_id().hex(),
             "labels": {key.decode(): value.decode() for key, value in c_labels},
+            "temp_dir": c_node_info.temp_dir().decode(),
+            "session_dir": c_node_info.session_dir().decode(),
         }
