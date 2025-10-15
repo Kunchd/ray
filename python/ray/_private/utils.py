@@ -905,6 +905,15 @@ def get_conda_env_dir(env_name):
     return env_dir
 
 
+def resolve_user_ray_temp_dir(gcs_address, node_id):
+    # attempt to fetch from node info
+    node_info = ray._private.services.get_node(gcs_address, node_id)
+    if "temp_dir" in node_info:
+        return node_info["temp_dir"]
+    # fallback to default ray temp dir
+    return ray._common.utils.get_default_ray_temp_dir()
+
+
 def get_ray_doc_version():
     """Get the docs.ray.io version corresponding to the ray.__version__."""
     # The ray.__version__ can be official Ray release (such as 1.12.0), or

@@ -2020,10 +2020,8 @@ def timeline(address):
     logger.info(f"Connecting to Ray instance at {address}.")
     ray.init(address=address)
     time = datetime.today().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = os.path.join(
-        ray._common.utils.get_user_temp_dir(), f"ray-timeline-{time}.json"
-    )
-    ray.timeline(filename=filename)
+    filename = f"ray-timeline-{time}.json"
+    ray.timeline(filename=filename, store_in_ray_temp=True)
     size = os.path.getsize(filename)
     logger.info(f"Trace file written to {filename} ({size} bytes).")
     logger.info("You can open this with chrome://tracing in the Chrome browser.")

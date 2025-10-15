@@ -200,7 +200,7 @@ def get_call_location(back: int = 1):
         return "UNKNOWN"
 
 
-def get_user_temp_dir():
+def get_default_temp_dir():
     if "RAY_TMPDIR" in os.environ:
         return os.environ["RAY_TMPDIR"]
     elif sys.platform.startswith("linux") and "TMPDIR" in os.environ:
@@ -214,13 +214,13 @@ def get_user_temp_dir():
     return tempdir
 
 
-def get_ray_temp_dir():
-    return os.path.join(get_user_temp_dir(), "ray")
+def get_default_ray_temp_dir():
+    return os.path.join(get_default_temp_dir(), "ray")
 
 
 def get_ray_address_file(temp_dir: Optional[str]):
     if temp_dir is None:
-        temp_dir = get_ray_temp_dir()
+        temp_dir = get_default_ray_temp_dir()
     return os.path.join(temp_dir, "ray_current_cluster")
 
 

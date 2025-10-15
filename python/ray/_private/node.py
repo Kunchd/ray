@@ -462,7 +462,7 @@ class Node:
         self._temp_dir = self._ray_params.temp_dir
         if self.head:
             if self._temp_dir is None:
-                self._temp_dir = ray._common.utils.get_ray_temp_dir()
+                self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
         else:
             if self._temp_dir is None:
                 # Fetch temp dir from head node's NodeInfo
@@ -477,7 +477,7 @@ class Node:
                     logger.warning(
                         "Head node ID not found in GCS. Using Ray's default temp dir."
                     )
-                    self._temp_dir = ray._common.utils.get_ray_temp_dir()
+                    self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
                 else:
                     head_node_id = ray._common.utils.decode(head_node_id_bytes)
                     node_info = ray._private.services.get_node(
@@ -491,7 +491,7 @@ class Node:
                             "Using Ray's default temp dir."
                             "Available node info: " + str(node_info)
                         )
-                        self._temp_dir = ray._common.utils.get_ray_temp_dir()
+                        self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
 
         try_to_create_directory(self._temp_dir)
 
@@ -515,8 +515,11 @@ class Node:
         )
         try_to_create_directory(self._runtime_env_dir)
         # Create a symlink to the libtpu tpu_logs directory if it exists.
-        user_temp_dir = ray._common.utils.get_user_temp_dir()
-        tpu_log_dir = f"{user_temp_dir}/tpu_logs"
+        if "RAY_TMPDIR" in os.environ and os.path.isdir(os.environ["TPU_LOG_DIR"]):
+            tpu_log_dir = os.environ["TPU_LOG_DIR"]
+        else:
+            tpu_log_dir = "/tmp/tpu_logs"
+
         if os.path.isdir(tpu_log_dir):
             tpu_logs_symlink = os.path.join(self._logs_dir, "tpu_logs")
             try_to_symlink(tpu_logs_symlink, tpu_log_dir)
@@ -755,7 +758,9 @@ class Node:
                 "{directory_name}/{prefix}.{unique_index}{suffix}"
         """
         if directory_name is None:
-            directory_name = ray._common.utils.get_ray_temp_dir()
+            directory_name = ray._private.utils.resolve_user_ray_temp_dir(
+                self.gcs_address, self.node_id
+            )
         directory_name = os.path.expanduser(directory_name)
         index = self._incremental_dict[suffix, prefix, directory_name]
         # `tempfile.TMP_MAX` could be extremely large,
