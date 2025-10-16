@@ -24,20 +24,9 @@ logger = logging.getLogger(__name__)
 BACKOFF_S = 5
 
 
-def _get_log_dir(gcs_client: GcsClient) -> str:
-    # Get head node id
-    nodes = gcs_client.get_all_node_info()
-    head_node_id = None
-    for node_id, node_info in nodes.items():
-        if (
-            node_info.is_head_node
-            and node_info.state == ray.core.generated.gcs_pb2.GcsNodeInfo.ALIVE
-        ):
-            head_node_id = node_id.hex()
-            break
-
+def _get_log_dir() -> str:
     return os.path.join(
-        ray._private.utils.resolve_user_ray_temp_dir(gcs_client.address, head_node_id),
+        ray._private.utils.resolve_user_ray_temp_dir(),
         ray._private.ray_constants.SESSION_LATEST,
         "logs",
     )
@@ -86,7 +75,7 @@ def run_kuberay_autoscaler(cluster_name: str, cluster_namespace: str):
         MonitorV2(
             address=gcs_client.address,
             config_reader=KubeRayConfigReader(autoscaling_config_producer),
-            log_dir=_get_log_dir(gcs_client),
+            log_dir=_get_log_dir(),
             monitor_ip=head_ip,
         ).run()
     else:
@@ -109,7 +98,7 @@ def _setup_logging(gcs_client: GcsClient) -> None:
 
     Also log to pod stdout (logs viewable with `kubectl logs <head-pod> -c autoscaler`).
     """
-    log_dir = _get_log_dir(gcs_client)
+    log_dir = _get_log_dir()
     # The director should already exist, but try (safely) to create it just in case.
     try_to_create_directory(log_dir)
 

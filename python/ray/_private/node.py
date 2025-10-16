@@ -465,31 +465,30 @@ class Node:
                 self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
         else:
             if self._temp_dir is None:
-                # Fetch temp dir from head node's NodeInfo
-                head_node_id_bytes = ray._private.utils.internal_kv_get_with_retry(
-                    self.get_gcs_client(),
-                    ray_constants.KV_HEAD_NODE_ID_KEY,
-                    ray_constants.KV_NAMESPACE_JOB,
-                    num_retries=ray_constants.NUM_REDIS_GET_RETRIES,
-                )
+                # fetch head node info using gcs client
+                all_nodes = self.get_gcs_client().get_all_node_info(timeout=30)
+                head_node_id = None
+                node_info = None  # type: ignore
+                for node_id, node_info in all_nodes.items():
+                    if node_info.is_head_node:
+                        head_node_id = node_id
+                        node_info = node_info
+                        break
 
-                if head_node_id_bytes is None:
+                if head_node_id is None:
                     logger.warning(
                         "Head node ID not found in GCS. Using Ray's default temp dir."
                     )
                     self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
                 else:
-                    head_node_id = ray._common.utils.decode(head_node_id_bytes)
-                    node_info = ray._private.services.get_node(
-                        self.gcs_address,
-                        head_node_id,
+                    self._temp_dir = (
+                        getattr(node_info, "temp_dir", None)
+                        or ray._common.utils.get_default_ray_temp_dir()
                     )
-                    self._temp_dir = node_info.get("temp_dir")
                     if not self._temp_dir:
                         logger.warning(
                             "Head node temp_dir not found in NodeInfo. "
                             "Using Ray's default temp dir."
-                            "Available node info: " + str(node_info)
                         )
                         self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
 
@@ -515,7 +514,11 @@ class Node:
         )
         try_to_create_directory(self._runtime_env_dir)
         # Create a symlink to the libtpu tpu_logs directory if it exists.
-        if "RAY_TMPDIR" in os.environ and os.path.isdir(os.environ["TPU_LOG_DIR"]):
+        if (
+            "RAY_TMPDIR" in os.environ
+            and "TPU_LOG_DIR" in os.environ
+            and os.path.isdir(os.environ["TPU_LOG_DIR"])
+        ):
             tpu_log_dir = os.environ["TPU_LOG_DIR"]
         else:
             tpu_log_dir = "/tmp/tpu_logs"
@@ -758,9 +761,7 @@ class Node:
                 "{directory_name}/{prefix}.{unique_index}{suffix}"
         """
         if directory_name is None:
-            directory_name = ray._private.utils.resolve_user_ray_temp_dir(
-                self.gcs_address, self.node_id
-            )
+            directory_name = ray._private.utils.resolve_user_ray_temp_dir()
         directory_name = os.path.expanduser(directory_name)
         index = self._incremental_dict[suffix, prefix, directory_name]
         # `tempfile.TMP_MAX` could be extremely large,
