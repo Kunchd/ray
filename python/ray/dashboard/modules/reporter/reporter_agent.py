@@ -856,7 +856,7 @@ class ReporterAgent(
         return total, available, percent, used
 
     @staticmethod
-    def _get_disk_usage():
+    def _get_disk_usage(temp_dir: str):
         if IN_KUBERNETES_POD and not ENABLE_K8S_DISK_USAGE:
             # If in a K8s pod, disable disk display by passing in dummy values.
             return {
@@ -866,10 +866,9 @@ class ReporterAgent(
             root = psutil.disk_partitions()[0].mountpoint
         else:
             root = os.sep
-        tmp = ray._private.utils.resolve_user_ray_temp_dir()
         return {
             "/": psutil.disk_usage(root),
-            tmp: psutil.disk_usage(tmp),
+            temp_dir: psutil.disk_usage(temp_dir),
         }
 
     @staticmethod
@@ -1083,7 +1082,7 @@ class ReporterAgent(
             "agent": self._get_agent(),
             "bootTime": self._get_boot_time(),
             "loadAvg": self._get_load_avg(),
-            "disk": self._get_disk_usage(),
+            "disk": self._get_disk_usage(self._dashboard_agent.temp_dir),
             "disk_io": disk_stats,
             "disk_io_speed": disk_speed_stats,
             "gpus": gpus,

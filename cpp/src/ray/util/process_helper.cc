@@ -114,11 +114,7 @@ void ProcessHelper::RayStart(CoreWorkerOptions::TaskExecutionCallback callback) 
     ConfigInternal::Instance().plasma_store_socket_name =
         node_info.object_store_socket_name();
     ConfigInternal::Instance().node_manager_port = node_info.node_manager_port();
-
-    // Update session dir if driver
-    if (ConfigInternal::Instance().worker_type == WorkerType::DRIVER) {
-      ConfigInternal::Instance().UpdateSessionDir(node_info.session_dir());
-    }
+    ConfigInternal::Instance().UpdateSessionDir(node_info.session_dir());
   }
   RAY_CHECK(!ConfigInternal::Instance().raylet_socket_name.empty());
   RAY_CHECK(!ConfigInternal::Instance().plasma_store_socket_name.empty());

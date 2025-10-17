@@ -465,6 +465,7 @@ class Node:
                 self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
         else:
             if self._temp_dir is None:
+                assert not self._default_worker
                 # fetch head node info using gcs client
                 all_nodes = self.get_gcs_client().get_all_node_info(timeout=30)
                 head_node_id = None
@@ -761,7 +762,7 @@ class Node:
                 "{directory_name}/{prefix}.{unique_index}{suffix}"
         """
         if directory_name is None:
-            directory_name = ray._private.utils.resolve_user_ray_temp_dir()
+            directory_name = self._temp_dir
         directory_name = os.path.expanduser(directory_name)
         index = self._incremental_dict[suffix, prefix, directory_name]
         # `tempfile.TMP_MAX` could be extremely large,

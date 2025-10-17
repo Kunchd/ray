@@ -2151,7 +2151,6 @@ def determine_plasma_store_config(
                     )
                 )
             else:
-                # TODO(Kunchd): confirm that this is desired
                 plasma_directory = temp_dir
                 logger.warning(
                     "WARNING: The object store is using {} instead of "

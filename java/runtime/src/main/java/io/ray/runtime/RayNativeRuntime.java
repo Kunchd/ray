@@ -66,25 +66,23 @@ public final class RayNativeRuntime extends AbstractRayRuntime {
       }
       Preconditions.checkNotNull(rayConfig.getBootstrapAddress());
 
-      // In order to remove redis dependency in Java lang, we use a temp dir to load library
-      // instead of getting session dir from redis.
       if (rayConfig.workerMode == WorkerType.DRIVER) {
-        // Get node info to fetch session_dir and other node configuration.
-        GcsNodeInfo nodeInfo = getGcsClient().getNodeToConnectForDriver(rayConfig.nodeIp);
-        rayConfig.rayletSocketName = nodeInfo.getRayletSocketName();
-        rayConfig.objectStoreSocketName = nodeInfo.getObjectStoreSocketName();
-        rayConfig.nodeManagerPort = nodeInfo.getNodeManagerPort();
-
+        // In order to remove redis dependency in Java lang, we use a temp dir to load library
+        // instead of getting session dir from redis.
         String tmpDir = "/tmp/ray/".concat(String.valueOf(System.currentTimeMillis()));
         JniUtils.loadLibrary(tmpDir, BinaryFileUtil.CORE_WORKER_JAVA_LIBRARY, true);
 
+        GcsNodeInfo nodeInfo = getGcsClient().getNodeToConnectForDriver(rayConfig.nodeIp);
+
         // Update session dir.
-        // Fetch session dir from node info.
         final String sessionDir = nodeInfo.getSessionDir();
         Preconditions.checkNotNull(sessionDir, "Session dir not found in node info");
         rayConfig.setSessionDir(sessionDir);
-
         Preconditions.checkNotNull(rayConfig.sessionDir);
+
+        rayConfig.rayletSocketName = nodeInfo.getRayletSocketName();
+        rayConfig.objectStoreSocketName = nodeInfo.getObjectStoreSocketName();
+        rayConfig.nodeManagerPort = nodeInfo.getNodeManagerPort();
       } else {
         // Expose ray ABI symbols which may be depended by other shared
         // libraries such as libstreaming_java.so.
