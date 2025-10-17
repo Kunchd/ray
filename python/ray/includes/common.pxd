@@ -703,8 +703,6 @@ cdef extern from "src/ray/protobuf/gcs.pb.h" nogil:
         c_string raylet_socket_name() const
         int metrics_export_port() const
         int runtime_env_agent_port() const
-        c_string temp_dir() const
-        c_string session_dir() const
         CNodeDeathInfo death_info() const
         void ParseFromString(const c_string &serialized)
         const c_string& SerializeAsString() const

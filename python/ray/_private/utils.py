@@ -910,11 +910,9 @@ def resolve_user_ray_temp_dir(gcs_address, node_id):
         # attempt to fetch from node info
         node_info = ray._private.services.get_node(gcs_address, node_id)
         if "temp_dir" in node_info:
-            logger.info("Found temp dir in node info: %s", node_info["temp_dir"])
             return node_info["temp_dir"]
 
     # fallback to default ray temp dir
-    logger.info("Fallback to default ray temp dir")
     return ray._common.utils.get_default_ray_temp_dir()
 
 

@@ -29,10 +29,7 @@ def _get_log_dir(gcs_client: GcsClient) -> str:
     nodes = gcs_client.get_all_node_info()
     head_node_id = None
     for node_id, node_info in nodes.items():
-        if (
-            node_info.is_head_node
-            and node_info.state == ray.core.generated.gcs_pb2.GcsNodeInfo.ALIVE
-        ):
+        if node_info.is_head_node:
             head_node_id = node_id.hex()
             break
 
@@ -109,7 +106,6 @@ def _setup_logging(gcs_client: GcsClient) -> None:
 
     Also log to pod stdout (logs viewable with `kubectl logs <head-pod> -c autoscaler`).
     """
-    logger.info("Setting up logging, ray initialized: %s", ray.is_initialized())
     log_dir = _get_log_dir(gcs_client)
     # The director should already exist, but try (safely) to create it just in case.
     try_to_create_directory(log_dir)

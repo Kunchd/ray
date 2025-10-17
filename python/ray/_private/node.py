@@ -515,11 +515,7 @@ class Node:
         )
         try_to_create_directory(self._runtime_env_dir)
         # Create a symlink to the libtpu tpu_logs directory if it exists.
-        if (
-            "RAY_TMPDIR" in os.environ
-            and "TPU_LOG_DIR" in os.environ
-            and os.path.isdir(os.environ["TPU_LOG_DIR"])
-        ):
+        if "TPU_LOG_DIR" in os.environ and os.path.isdir(os.environ["TPU_LOG_DIR"]):
             tpu_log_dir = os.environ["TPU_LOG_DIR"]
         else:
             tpu_log_dir = "/tmp/tpu_logs"
