@@ -34,7 +34,7 @@ def _get_log_dir(gcs_client: GcsClient) -> str:
             break
 
     return os.path.join(
-        ray._private.utils.resolve_user_ray_temp_dir(gcs_client.address, head_node_id),
+        ray._common.utils.resolve_user_ray_temp_dir(gcs_client.address, head_node_id),
         ray._private.ray_constants.SESSION_LATEST,
         "logs",
     )

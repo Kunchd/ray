@@ -462,7 +462,7 @@ class Node:
         self._temp_dir = self._ray_params.temp_dir
         if self.head:
             if self._temp_dir is None:
-                self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
+                self._temp_dir = ray._private.utils.get_default_ray_temp_dir()
         else:
             if self._temp_dir is None:
                 assert not self._default_worker
@@ -480,18 +480,18 @@ class Node:
                     logger.warning(
                         "Head node ID not found in GCS. Using Ray's default temp dir."
                     )
-                    self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
+                    self._temp_dir = ray._private.utils.get_default_ray_temp_dir()
                 else:
                     self._temp_dir = (
                         getattr(node_info, "temp_dir", None)
-                        or ray._common.utils.get_default_ray_temp_dir()
+                        or ray._private.utils.get_default_ray_temp_dir()
                     )
                     if not self._temp_dir:
                         logger.warning(
                             "Head node temp_dir not found in NodeInfo. "
                             "Using Ray's default temp dir."
                         )
-                        self._temp_dir = ray._common.utils.get_default_ray_temp_dir()
+                        self._temp_dir = ray._private.utils.get_default_ray_temp_dir()
 
         try_to_create_directory(self._temp_dir)
 

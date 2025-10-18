@@ -941,7 +941,7 @@ def start_ray_process(
 
         # TODO(suquark): Any better temp file creation here?
         gdb_init_path = os.path.join(
-            ray._common.utils.get_default_ray_temp_dir(),
+            ray._private.utils.get_default_ray_temp_dir(),
             f"gdb_init_{process_type}_{time.time()}",
         )
         ray_process_path = command[0]

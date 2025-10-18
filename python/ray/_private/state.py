@@ -1038,12 +1038,12 @@ def timeline(filename=None, store_in_ray_temp=False):
             gcs_address = ray.get_gcs_client().gcs_address
             node_id = ray.get_runtime_context().node_id
             resolved_filename = os.path.join(
-                ray._private.utils.resolve_user_ray_temp_dir(gcs_address, node_id),
+                ray._common.utils.resolve_user_ray_temp_dir(gcs_address, node_id),
                 filename,
             )
         else:
             resolved_filename = os.path.join(
-                ray._common.utils.get_default_ray_temp_dir(), filename
+                ray._private.utils.get_default_ray_temp_dir(), filename
             )
     else:
         resolved_filename = filename
