@@ -528,7 +528,12 @@ class GcsClientTest : public ::testing::TestWithParam<bool> {
   observability::FakeCounter fake_io_context_monitor_unhealthy_counter_;
 };
 
+// Redis does not officially support Windows, so only test in-memory storage there.
+#ifdef _WIN32
+INSTANTIATE_TEST_SUITE_P(RedisMigration, GcsClientTest, testing::Values(true));
+#else
 INSTANTIATE_TEST_SUITE_P(RedisMigration, GcsClientTest, testing::Bool());
+#endif
 
 TEST_P(GcsClientTest, TestCheckAlive) {
   auto node_info1 = GenNodeInfo();

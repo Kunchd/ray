@@ -402,8 +402,15 @@ TEST_P(GlobalStateAccessorTest, TestPlacementGroupTable) {
   ASSERT_EQ(global_state_->GetAllPlacementGroupInfo().size(), 0);
 }
 
+// Redis does not officially support Windows, so only test in-memory storage there.
+#ifdef _WIN32
+INSTANTIATE_TEST_SUITE_P(RedisRemovalTest,
+                         GlobalStateAccessorTest,
+                         ::testing::Values(true));
+#else
 INSTANTIATE_TEST_SUITE_P(RedisRemovalTest,
                          GlobalStateAccessorTest,
                          ::testing::Values(false, true));
+#endif
 
 }  // namespace ray

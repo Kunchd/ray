@@ -29,7 +29,11 @@
 
 class GcsKVManagerTest : public ::testing::TestWithParam<std::string> {
  public:
-  GcsKVManagerTest() { ray::TestSetupUtil::StartUpRedisServers(std::vector<int>()); }
+  GcsKVManagerTest() {
+    if (GetParam() == "redis") {
+      ray::TestSetupUtil::StartUpRedisServers(std::vector<int>());
+    }
+  }
 
   void SetUp() override {
     thread_io_service = std::make_unique<std::thread>([this] {
@@ -154,6 +158,13 @@ TEST_P(GcsKVManagerTest, TestInternalKV) {
   ASSERT_EQ(0, SyncMultiGet("N1", {"A_1", "A_2", "A_3"}).size());
 }
 
+// Redis does not officially support Windows, so only test in-memory storage there.
+#ifdef _WIN32
+INSTANTIATE_TEST_SUITE_P(GcsKVManagerTestFixture,
+                         GcsKVManagerTest,
+                         ::testing::Values("memory"));
+#else
 INSTANTIATE_TEST_SUITE_P(GcsKVManagerTestFixture,
                          GcsKVManagerTest,
                          ::testing::Values("redis", "memory"));
+#endif

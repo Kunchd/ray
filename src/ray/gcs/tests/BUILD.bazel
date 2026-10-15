@@ -294,7 +294,11 @@ ray_cc_test(
         "TEST_REDIS_SERVER_EXEC_PATH": "$(rootpath //:redis-server)",
         "TEST_REDIS_CLIENT_EXEC_PATH": "$(rootpath //:redis-cli)",
     },
-    tags = ["team:core"],
+    tags = [
+        # Redis does not officially support Windows.
+        "no_windows",
+        "team:core",
+    ],
     visibility = ["//visibility:private"],
     deps = [
         ":gcs_table_storage_test_lib",
