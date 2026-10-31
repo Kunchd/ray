@@ -1,15 +1,18 @@
 import logging
 import os
+import re
 import threading
 import time
 from collections import defaultdict
-from typing import Callable, List, Optional
+from dataclasses import dataclass, field
+from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 from urllib.parse import unquote
 
 from opentelemetry import metrics
 from opentelemetry.exporter.prometheus import PrometheusMetricReader
 from opentelemetry.metrics import Observation
 from opentelemetry.sdk.metrics import MeterProvider
+from prometheus_client.core import REGISTRY, CollectorRegistry, HistogramMetricFamily
 
 import ray
 from ray._private.metrics_agent import Record
@@ -19,6 +22,57 @@ from ray._private.telemetry.metric_types import MetricType
 logger = logging.getLogger(__name__)
 
 NAMESPACE = "ray"
+
+# Mirror the name sanitization of the OpenTelemetry Prometheus exporter
+# (opentelemetry/exporter/prometheus/_mapping.py), so histograms served by
+# _AggregatedHistogramCollector keep the series names and labels they had when they
+# went through the exporter.
+_SANITIZE_NAME_RE = re.compile(r"[^a-zA-Z0-9:]+")
+_SANITIZE_LABEL_KEY_RE = re.compile(r"[^a-zA-Z0-9]+")
+
+
+def _sanitize_name(name: str) -> str:
+    if name and name[0].isdigit():
+        name = "_" + name[1:]
+    return _SANITIZE_NAME_RE.sub("_", name)
+
+
+def _sanitize_label_key(key: str) -> str:
+    if key and key[0].isdigit():
+        key = "_" + key[1:]
+    return _SANITIZE_LABEL_KEY_RE.sub("_", key)
+
+
+@dataclass
+class _HistogramSeries:
+    """Cumulative bucket counts and sum of one histogram label set."""
+
+    bucket_counts: List[int]
+    sum: float = 0.0
+
+
+@dataclass
+class _AggregatedHistogram:
+    """A histogram fed with pre-aggregated bucket counts (see
+    OpenTelemetryMetricRecorder.record_histogram_aggregated_batch)."""
+
+    description: str
+    # Upper bounds of the buckets, excluding the implicit +Inf bucket.
+    bounds: Tuple[float, ...]
+    series: Dict[FrozenSet[Tuple[str, str]], _HistogramSeries] = field(
+        default_factory=dict
+    )
+
+
+class _AggregatedHistogramCollector:
+    """prometheus_client collector that serves the recorder's pre-aggregated
+    histograms."""
+
+    def __init__(self, recorder: "OpenTelemetryMetricRecorder"):
+        self._recorder = recorder
+
+    def collect(self):
+        return self._recorder._collect_aggregated_histograms()
 
 
 def _get_service_name(default_name: str) -> str:
@@ -46,7 +100,11 @@ class OpenTelemetryMetricRecorder:
     _metrics_initialized = False
     _metrics_initialized_lock = threading.Lock()
 
-    def __init__(self, gauge_metric_ttl_seconds: Optional[float] = None):
+    def __init__(
+        self,
+        gauge_metric_ttl_seconds: Optional[float] = None,
+        registry: CollectorRegistry = REGISTRY,
+    ):
         # Lock-ordering contract:
         #   _registration_lock -> SDK meter locks (via meter.create_*)
         #   _registration_lock -> _lock
@@ -63,9 +121,8 @@ class OpenTelemetryMetricRecorder:
         # registration stays serialized (no duplicate instruments on a race)
         # without _lock being held across those SDK entry points.
         #
-        # Note: the synchronous histogram paths (set_metric_value,
-        # record_histogram_aggregated_batch) do call instrument.record() while
-        # holding _lock. That is safe from this deadlock: record() only takes
+        # Note: the synchronous histogram path (set_metric_value) does call
+        # instrument.record() while holding _lock. That is safe from this deadlock: record() only takes
         # per-reader-storage locks, never the measurement-consumer lock, and
         # reader-storage code never calls back into this recorder, so no lock
         # cycle can form. Keep any new SDK call out of _lock unless it has the
@@ -79,13 +136,19 @@ class OpenTelemetryMetricRecorder:
         self._gauge_observations_by_name = defaultdict(dict)
         self._counter_observations_by_name = defaultdict(dict)
         self._sum_observations_by_name = defaultdict(dict)
-        self._histogram_bucket_midpoints = defaultdict(list)
+        self._aggregated_histograms: Dict[str, _AggregatedHistogram] = {}
         self._histogram_bucket_mismatch_warned = set()
         self._gauge_metric_ttl_s = self._resolve_gauge_ttl_seconds(
             gauge_metric_ttl_seconds
         )
         self._init_metrics()
         self.meter = metrics.get_meter(__name__)
+        # Pre-aggregated histograms bypass the OpenTelemetry SDK, whose synchronous
+        # histogram only accepts individual measurements, and are served to
+        # Prometheus by this collector. Its collect() only takes _lock, and the
+        # registry runs it separately from the OpenTelemetry reader's collector, so
+        # it adds no lock-ordering constraints.
+        registry.register(_AggregatedHistogramCollector(self))
 
     @staticmethod
     def _resolve_gauge_ttl_seconds(override: Optional[float]) -> float:
@@ -315,28 +378,8 @@ class OpenTelemetryMetricRecorder:
                 explicit_bucket_boundaries_advisory=buckets,
             )
 
-            # calculate the bucket midpoints; this is used for converting histogram
-            # internal representation to approximated histogram data points.
-            midpoints = []
-            for i in range(len(buckets)):
-                if i == 0:
-                    lower_bound = 0.0 if buckets[0] > 0 else buckets[0] * 2.0
-                    midpoints.append((lower_bound + buckets[0]) / 2.0)
-                else:
-                    midpoints.append((buckets[i] + buckets[i - 1]) / 2.0)
-            # Approximated mid point for Inf+ bucket. Inf+ bucket is an implicit bucket
-            # that is not part of buckets.
-            midpoints.append(1.0 if buckets[-1] <= 0 else buckets[-1] * 2.0)
-
             with self._lock:
                 self._registered_instruments[name] = instrument
-                self._histogram_bucket_midpoints[name] = midpoints
-
-    def get_histogram_bucket_midpoints(self, name: str) -> List[float]:
-        """
-        Get the bucket midpoints for a histogram metric with the given name.
-        """
-        return self._histogram_bucket_midpoints[name]
 
     def set_metric_value(self, name: str, tags: dict, value: float):
         """
@@ -393,62 +436,112 @@ class OpenTelemetryMetricRecorder:
     def record_histogram_aggregated_batch(
         self,
         name: str,
+        description: str,
         data_points: List[dict],
     ) -> None:
         """
-        Record pre-aggregated histogram data for multiple data points in a single batch.
+        Add pre-aggregated histogram data points to the histogram with the given name.
 
-        This method takes pre-aggregated bucket counts and reconstructs individual
-        observations using bucket midpoints. It acquires the lock once and performs
-        all record() calls for ALL data points, minimizing lock contention.
+        Each data point is a dict with "tags", "explicit_bounds" (bucket upper bounds,
+        excluding +Inf), "bucket_counts" and "sum", holding the delta since the
+        emitter's previous export. The bucket counts and sum are added exactly to the
+        cumulative series of the data point's tags, after dropping high cardinality
+        labels, so the cost is per data point rather than per observation.
 
-        A metric name is registered once per node, but several processes may emit it
-        with different bucket bounds (e.g. two vLLM engines configured with different
-        max_model_len). Data points whose bucket count disagrees with the registered
-        bounds cannot be reconstructed, so they are skipped rather than raising, which
-        would otherwise abort ingestion for the rest of the reporting component's
-        metrics. Exact pass-through of bucket_counts/sum, which would let such
-        emitters through, is tracked in
-        https://github.com/ray-project/ray/issues/64852.
-
-        Note: The histogram sum value will be an approximation since we use bucket midpoints instead of actual values.
+        The first data point seen for a name fixes its bounds. Several processes may
+        emit the same name with different bounds (e.g. two vLLM engines configured
+        with different max_model_len), whose counts cannot be added together. Those
+        data points are skipped with a warning rather than raising, which would
+        otherwise abort ingestion for the rest of the reporting component's metrics.
         """
+        if not data_points:
+            return
         with self._lock:
-            instrument = self._registered_instruments.get(name)
-            if not isinstance(instrument, metrics.Histogram):
-                logger.warning(
-                    f"Metric {name} is not a registered histogram, skipping recording."
+            histogram = self._aggregated_histograms.get(name)
+            if histogram is None:
+                histogram = _AggregatedHistogram(
+                    description=description,
+                    bounds=tuple(data_points[0]["explicit_bounds"]),
                 )
-                return
+                self._aggregated_histograms[name] = histogram
 
-            bucket_midpoints = self._histogram_bucket_midpoints[name]
             high_cardinality_labels = (
                 MetricCardinality.get_high_cardinality_labels_to_drop(name)
             )
-
+            num_buckets = len(histogram.bounds) + 1
             for dp in data_points:
-                tags = dp["tags"]
                 bucket_counts = dp["bucket_counts"]
-                if len(bucket_counts) != len(bucket_midpoints):
+                if (
+                    tuple(dp["explicit_bounds"]) != histogram.bounds
+                    or len(bucket_counts) != num_buckets
+                ):
                     if name not in self._histogram_bucket_mismatch_warned:
                         self._histogram_bucket_mismatch_warned.add(name)
                         logger.warning(
-                            f"Metric {name} was reported with {len(bucket_counts)} "
-                            f"buckets but {len(bucket_midpoints)} were expected; "
-                            "skipping the data point."
+                            f"Metric {name} was reported with bucket bounds "
+                            f"{list(dp['explicit_bounds'])} but "
+                            f"{list(histogram.bounds)} were expected; skipping the "
+                            "data point."
                         )
                     continue
 
-                filtered_tags = {
-                    k: v for k, v in tags.items() if k not in high_cardinality_labels
-                }
+                # Prometheus treats an empty label value as an absent label, so drop
+                # empty values to merge data points that differ only in that.
+                tag_key = frozenset(
+                    (k, v)
+                    for k, v in dp["tags"].items()
+                    if k not in high_cardinality_labels and v != ""
+                )
+                series = histogram.series.get(tag_key)
+                if series is None:
+                    series = _HistogramSeries(bucket_counts=[0] * num_buckets)
+                    histogram.series[tag_key] = series
+                for i, count in enumerate(bucket_counts):
+                    series.bucket_counts[i] += count
+                series.sum += dp["sum"]
 
-                for i, bucket_count in enumerate(bucket_counts):
-                    if bucket_count == 0:
-                        continue
-                    midpoint = bucket_midpoints[i]
-                    for _ in range(bucket_count):
-                        instrument.record(midpoint, attributes=filtered_tags)
+    def _collect_aggregated_histograms(self) -> List[HistogramMetricFamily]:
+        """Build the Prometheus families of the pre-aggregated histograms, in the
+        same format the OpenTelemetry Prometheus exporter produces."""
+        with self._lock:
+            snapshot = [
+                (
+                    name,
+                    histogram.description,
+                    histogram.bounds,
+                    [
+                        (dict(tag_key), list(series.bucket_counts), series.sum)
+                        for tag_key, series in histogram.series.items()
+                    ],
+                )
+                for name, histogram in self._aggregated_histograms.items()
+            ]
+
+        families = []
+        for name, description, bounds, series_list in snapshot:
+            if not series_list:
+                continue
+            # Keep a single label schema for the metric.
+            label_keys = sorted({k for tags, _, _ in series_list for k in tags})
+            family = HistogramMetricFamily(
+                name=_sanitize_name(f"{NAMESPACE}_{name}"),
+                documentation=description,
+                labels=[_sanitize_label_key(k) for k in label_keys],
+            )
+            upper_bounds = [str(bound) for bound in bounds] + ["+Inf"]
+            for tags, bucket_counts, total in series_list:
+                cumulative_count = 0
+                buckets = []
+                for upper_bound, count in zip(upper_bounds, bucket_counts):
+                    cumulative_count += count
+                    buckets.append((upper_bound, cumulative_count))
+                family.add_metric(
+                    labels=[tags.get(k, "") for k in label_keys],
+                    buckets=buckets,
+                    sum_value=total,
+                )
+            families.append(family)
+        return families
 
     def record_and_export(self, records: List[Record], global_tags=None):
         """

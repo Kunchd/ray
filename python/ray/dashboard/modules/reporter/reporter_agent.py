@@ -777,55 +777,27 @@ class ReporterAgent(
         metric: Metric,
     ) -> None:
         """
-        TODO(can-anyscale): once we launch the new open-telemetry stack, we need to
-        document and communicate that the histogram metric is an approximation to users.
-        The approximation is good enough for the dashboard to display the histogram
-        distribution. Only the sum of all data points will be the approximation. See
-        https://github.com/ray-project/ray/issues/54538 for the complete backlog of Ray
-        metric infra improvements.
-
-        Export histogram data points to OpenTelemetry Metric Recorder. A histogram
-        metric is aggregated into several internal representations in C++ side:
-        - sum of all buckets
-        - count of all buckets
-        - count per bucket
-
-        We reconstruct the histogram data points from these internal representations
-        and export them to OpenTelemetry Metric Recorder. The reconstruction is an
-        approximation, but it is good enough for the dashboard to display the histogram
-        data points.
+        Export histogram data points to the OpenTelemetry Metric Recorder. Emitters
+        aggregate each histogram into per-bucket counts and a sum, and export the
+        delta since their previous export. The recorder adds them exactly to the
+        node's cumulative series.
         """
-        data_points = metric.histogram.data_points
-        if not data_points:
-            return
-        self._open_telemetry_metric_recorder.register_histogram_metric(
-            metric.name,
-            metric.description,
-            data_points[0].explicit_bounds,
-        )
-        # Collect all data points and record using a single call
-        batch_data_points = []
-        for data_point in data_points:
-            if data_point.count == 0:
-                continue
-
-            tags = {tag.key: tag.value.string_value for tag in data_point.attributes}
-            batch_data_points.append(
-                {
-                    "tags": tags,
-                    "bucket_counts": list(data_point.bucket_counts),
-                }
-            )
-
+        batch_data_points = [
+            {
+                "tags": {
+                    tag.key: tag.value.string_value for tag in data_point.attributes
+                },
+                "explicit_bounds": list(data_point.explicit_bounds),
+                "bucket_counts": list(data_point.bucket_counts),
+                "sum": data_point.sum,
+            }
+            for data_point in metric.histogram.data_points
+            if data_point.count > 0
+        ]
         if batch_data_points:
-            # Keep a single label schema for each histogram batch before
-            # recording the reconstructed data points.
-            all_keys = sorted({k for dp in batch_data_points for k in dp["tags"]})
-            for dp in batch_data_points:
-                tags = dp["tags"]
-                dp["tags"] = {k: tags.get(k, "") for k in all_keys}
             self._open_telemetry_metric_recorder.record_histogram_aggregated_batch(
                 metric.name,
+                metric.description,
                 batch_data_points,
             )
 
