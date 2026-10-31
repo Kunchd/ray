@@ -376,6 +376,45 @@ def test_record_histogram_aggregated_batch(
     mock_logger_warning.assert_not_called()
 
 
+@patch("opentelemetry.metrics.set_meter_provider")
+@patch("opentelemetry.metrics.get_meter")
+def test_record_histogram_aggregated_batch_node_level_aggregation(
+    mock_get_meter, mock_set_meter_provider
+):
+    """Node level aggregated metrics drop the per-process labels, so data points from
+    different processes on the node are recorded under the same attributes."""
+    mock_meter = MagicMock()
+    real_histogram = NoOpHistogram(name="grpc_client_network_latency_ms")
+    mock_histogram = MagicMock(wraps=real_histogram, spec=real_histogram)
+    mock_meter.create_histogram.return_value = mock_histogram
+    mock_get_meter.return_value = mock_meter
+
+    recorder = OpenTelemetryMetricRecorder()
+    recorder.register_histogram_metric(
+        name="grpc_client_network_latency_ms",
+        description="Test Histogram",
+        buckets=[1.0, 10.0],
+    )
+    node_tags = {"NodeAddress": "10.0.0.1", "DestinationNodeIp": "10.0.0.2"}
+    recorder.record_histogram_aggregated_batch(
+        name="grpc_client_network_latency_ms",
+        data_points=[
+            {
+                "tags": {**node_tags, "Component": "raylet", "WorkerId": ""},
+                "bucket_counts": [1, 0, 0],
+            },
+            {
+                "tags": {**node_tags, "Component": "core_worker", "WorkerId": "abc"},
+                "bucket_counts": [0, 1, 0],
+            },
+        ],
+    )
+
+    assert mock_histogram.record.call_count == 2
+    for call in mock_histogram.record.call_args_list:
+        assert call.kwargs["attributes"] == node_tags
+
+
 @patch("ray._private.telemetry.open_telemetry_metric_recorder.logger.warning")
 @patch("opentelemetry.metrics.set_meter_provider")
 @patch("opentelemetry.metrics.get_meter")

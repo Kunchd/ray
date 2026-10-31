@@ -34,3 +34,15 @@ ray_cc_test(
         "//src/ray/stats:percentile_tracker",
     ],
 )
+
+ray_cc_test(
+    name = "bucket_histogram_metric_test",
+    size = "small",
+    srcs = ["bucket_histogram_metric_test.cc"],
+    tags = ["team:core"],
+    deps = [
+        "//src/ray/stats:bucket_histogram_metric",
+        "//src/ray/stats:quadratic_bucket_scheme",
+        "//src/ray/stats:stats_metric",
+    ],
+)

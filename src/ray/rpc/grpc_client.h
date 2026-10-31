@@ -81,6 +81,7 @@ class GrpcClient {
       : client_call_manager_(call_manager),
         channel_(std::move(channel)),
         stub_(GrpcService::NewStub(channel_)),
+        server_address_(server_address),
         is_local_target_(IsLocalhost(server_address) ||
                          server_address == call_manager.GetLocalAddress()),
         skip_testing_intra_node_rpc_failure_(
@@ -94,6 +95,7 @@ class GrpcClient {
       : client_call_manager_(call_manager),
         channel_(BuildChannel(address, port, std::move(channel_arguments))),
         stub_(GrpcService::NewStub(channel_)),
+        server_address_(address),
         is_local_target_(IsLocalhost(address) ||
                          address == call_manager.GetLocalAddress()),
         skip_testing_intra_node_rpc_failure_(
@@ -148,7 +150,8 @@ class GrpcClient {
           },
           std::move(call_name),
           method_timeout_ms,
-          is_local_target_);
+          is_local_target_,
+          server_address_);
     } else if (failure == testing::RpcFailure::InFlight) {
       // Simulate the case where the RPC fails after sending the request to the server but
       // before the reply is sent back.
@@ -163,7 +166,8 @@ class GrpcClient {
           },
           std::move(call_name),
           method_timeout_ms,
-          is_local_target_);
+          is_local_target_,
+          server_address_);
       client_call_manager_.GetMainService().post(
           [callback]() {
             callback(Status::RpcError("Unavailable", grpc::StatusCode::UNAVAILABLE),
@@ -178,7 +182,8 @@ class GrpcClient {
           callback,
           std::move(call_name),
           method_timeout_ms,
-          is_local_target_);
+          is_local_target_,
+          server_address_);
       RAY_CHECK(call != nullptr);
     }
 
@@ -205,6 +210,8 @@ class GrpcClient {
   std::unique_ptr<typename GrpcService::Stub> stub_;
   /// Whether CallMethod is invoked.
   std::atomic<bool> call_method_invoked_ = false;
+  /// Address (IP) of the server.
+  std::string server_address_;
   /// Whether the server is on the same node as this client.
   bool is_local_target_ = false;
   bool skip_testing_intra_node_rpc_failure_ = false;

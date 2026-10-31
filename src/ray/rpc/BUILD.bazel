@@ -22,7 +22,6 @@ ray_cc_library(
         "//src/ray/common:status",
         "//src/ray/util:time",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/synchronization",
     ],
 )
@@ -219,6 +218,7 @@ ray_cc_library(
     name = "metrics",
     hdrs = ["metrics.h"],
     deps = [
+        "//src/ray/stats:bucket_histogram_metric",
         "//src/ray/stats:stats_metric",
     ],
 )

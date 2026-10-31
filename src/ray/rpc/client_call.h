@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "absl/strings/numbers.h"
-#include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 #include "ray/asio/asio_chaos.h"
 #include "ray/asio/instrumented_io_context.h"
@@ -184,18 +183,25 @@ class ClientCallTag {
   ///
   /// \param call A `ClientCall` that represents a request.
   /// \param record_network_latency Whether to record the network latency of this call.
+  /// \param destination_ip IP of the server, used to tag the network latency metric.
   explicit ClientCallTag(std::shared_ptr<ClientCall> call,
-                         bool record_network_latency = false)
-      : call_(std::move(call)), record_network_latency_(record_network_latency) {}
+                         bool record_network_latency = false,
+                         std::string destination_ip = "")
+      : call_(std::move(call)),
+        record_network_latency_(record_network_latency),
+        destination_ip_(std::move(destination_ip)) {}
 
   /// Get the wrapped `ClientCall`.
   const std::shared_ptr<ClientCall> &GetCall() const { return call_; }
 
   bool RecordNetworkLatency() const { return record_network_latency_; }
 
+  const std::string &GetDestinationIp() const { return destination_ip_; }
+
  private:
   std::shared_ptr<ClientCall> call_;
   bool record_network_latency_;
+  std::string destination_ip_;
 };
 
 /// Represents the generic signature of a `FooService::Stub::PrepareAsyncBar`
@@ -286,6 +292,7 @@ class ClientCallManager {
   /// -1 means it will use the default timeout configured for the handler.
   /// \param[in] is_local_target Whether the server is on the same node as this client.
   /// Network latency is only recorded for calls to other nodes.
+  /// \param[in] destination_ip IP of the server. Tags the network latency metric.
   ///
   /// \return A `ClientCall` representing the request that was just sent.
   template <class GrpcService, class Request, class Reply>
@@ -296,7 +303,8 @@ class ClientCallManager {
       const ClientCallback<Reply> &callback,
       std::string call_name,
       int64_t method_timeout_ms = -1,
-      bool is_local_target = false) {
+      bool is_local_target = false,
+      std::string_view destination_ip = {}) {
     auto stats_handle = main_service_.stats()->RecordStart(std::move(call_name));
     if (method_timeout_ms == -1) {
       method_timeout_ms = call_timeout_ms_;
@@ -316,10 +324,13 @@ class ClientCallManager {
     // Because this function must return a `shared_ptr` to make sure the returned
     // `ClientCall` is safe to use. But `response_reader_->Finish` only accepts a raw
     // pointer.
+    const bool record_network_latency =
+        record_network_latency_ && !is_local_target &&
+        ::RayConfig::instance().enable_rpc_network_latency_recording();
     auto tag = new ClientCallTag(
         call,
-        record_network_latency_ && !is_local_target &&
-            ::RayConfig::instance().enable_rpc_network_latency_recording());
+        record_network_latency,
+        record_network_latency ? std::string(destination_ip) : std::string());
     call->response_reader_->Finish(
         &call->reply_, &call->status_, static_cast<void *>(tag));
     return call;
@@ -339,19 +350,15 @@ class ClientCallManager {
   /// the server reported spending on it. Measured before the reply is posted to
   /// `main_service_`, so client event loop delay is excluded. Calls whose reply has no
   /// server processing time (e.g. failed before reaching the server) are skipped.
-  void RecordNetworkLatency(ClientCall &call, const StatsHandle &stats_handle) {
-    const auto server_processing_ns = call.GetServerProcessingTimeNs();
+  void RecordNetworkLatency(const ClientCallTag &tag, const StatsHandle &stats_handle) {
+    const auto server_processing_ns = tag.GetCall()->GetServerProcessingTimeNs();
     if (!server_processing_ns.has_value()) {
       return;
     }
     const int64_t round_trip_ns = current_time_ns() - stats_handle.start_time;
     const double network_ms = (round_trip_ns - *server_processing_ns) / 1e6;
-    RAY_LOG(INFO) << absl::StrFormat(
-        "[Kunchd] Network latency for %s is %f ms (round trip %f ms, server %f ms)",
-        stats_handle.event_name,
-        network_ms,
-        round_trip_ns / 1e6,
-        *server_processing_ns / 1e6);
+    client_metrics_.network_latency_ms.Record(
+        network_ms, {{"DestinationNodeIp", tag.GetDestinationIp()}});
   }
 
   /// This function runs in a background thread. It keeps polling events from the
@@ -391,7 +398,7 @@ class ClientCallManager {
                                               {{"Method", stats_handle->event_name}});
           }
           if (tag->RecordNetworkLatency()) {
-            RecordNetworkLatency(*tag->GetCall(), *stats_handle);
+            RecordNetworkLatency(*tag, *stats_handle);
           }
           // Post the callback to the main event loop.
           main_service_.post(
